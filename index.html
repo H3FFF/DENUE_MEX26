@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hub Delivery MX - Mapa Interactivo</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css" />
+    <style>
+        body { margin:0; padding:0; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; }
+        #map { height:100vh; width:100%; }
+
+        .marker-radar-wrapper { position:relative; width:44px; height:44px; display:flex; align-items:center; justify-content:center; }
+        .marker-radar-core { position:absolute; width:22px; height:22px; border-radius:50%; background:linear-gradient(135deg,#FF007F,#FF6600); border:3px solid white; box-shadow:0 0 8px rgba(255,0,127,0.9); z-index:10; display:flex; align-items:center; justify-content:center; font-size:12px; color:white; font-weight:bold; }
+        .marker-radar-ring { position:absolute; border-radius:50%; border:3px solid #FF007F; opacity:0; animation:radar-wave 2s ease-out infinite; width:44px; height:44px; }
+        .marker-radar-ring:nth-child(1){ animation-delay:0s; } .marker-radar-ring:nth-child(2){ animation-delay:0.6s; } .marker-radar-ring:nth-child(3){ animation-delay:1.2s; }
+        @keyframes radar-wave { 0%{ transform:scale(0.3); opacity:1; border-color:#FF007F; } 70%{ opacity:0.7; border-color:#FF6600; } 100%{ transform:scale(2.8); opacity:0; border-color:#FF007F; } }
+        .marker-bounce-wrapper { display:flex; align-items:center; justify-content:center; animation:bounce-anim 0.8s ease-in-out infinite alternate; }
+        @keyframes bounce-anim { 0%{ transform:translateY(0px); } 100%{ transform:translateY(-10px); } }
+        .marker-bounce-core { width:28px; height:28px; border-radius:70%; background:linear-gradient(135deg,#00C853,#00BCD4); border:3px solid white; box-shadow:0 0 10px rgba(0,200,83,0.8); display:flex; align-items:center; justify-content:center; font-size:14px; }
+        .marker-opaco-core { width:22px; height:22px; border-radius:50%; background:linear-gradient(135deg,#9E9E9E,#607D8B); border:2px solid #ccc; opacity:0.85; display:flex; align-items:center; justify-content:center; font-size:11px; color:white; }
+
+
+        .status-btn { border:none; padding:5px 10px; margin:2px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold; color:white; transition:opacity 0.2s; }
+        .status-btn:hover { opacity:0.8; }
+        .status-btn:disabled { opacity:0.5; cursor:wait; }
+        .btn-interesado  { background-color:#FF007F; }
+        .btn-pickup      { background-color:#00C853; }
+        .btn-no          { background-color:#9E9E9E; }
+        .btn-contactado  { background-color:#3498db; }
+        .btn-sinresp     { background-color:#f39c12; }
+
+
+        .confirm-box {
+            margin-top:12px; padding:12px; background:#f8f9fa;
+            border:2px solid #1a5276; border-radius:8px; text-align:center; display:none;
+        }
+        .confirm-box p { margin:0 0 10px 0; font-size:13px; color:#333; }
+        .confirm-box .btn-confirm {
+            background:#27ae60; color:white; border:none; padding:7px 16px;
+            border-radius:5px; font-weight:bold; cursor:pointer; margin:0 4px;
+        }
+        .confirm-box .btn-cancel {
+            background:#e74c3c; color:white; border:none; padding:7px 16px;
+            border-radius:5px; font-weight:bold; cursor:pointer; margin:0 4px;
+        }
+
+
+        #sync-status {
+            position: fixed;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            background: white;
+            border-radius: 12px;
+            padding: 8px 18px;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+            border: 2px solid #ddd;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 220px;
+            justify-content: center;
+        }
+        #sync-dot { width:10px; height:10px; border-radius:50%; background:#95a5a6; flex-shrink:0; }
+        #sync-dot.ok      { background:#27ae60; }
+        #sync-dot.saving  { background:#f39c12; animation:pulse 0.8s infinite; }
+        #sync-dot.error   { background:#e74c3c; }
+        @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:0.3; } }
+        #last-update { font-size:10px; font-weight:normal; color:#666; margin-top:2px; text-align:center; }
+
+
+        .toast {
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 99999;
+            background: #27ae60;
+            color: white;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 13px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            display: none;
+        }
+        .toast.error { background:#e74c3c; }
+
+
+        .loading { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:9999; background:white; padding:30px; border-radius:15px; box-shadow:0 10px 25px rgba(0,0,0,0.3); text-align:center; border:4px solid #1a5276; }
+        .spinner { border:5px solid #f3f3f3; border-top:5px solid #1a5276; border-radius:50%; width:50px; height:50px; animation:spin 1s linear infinite; margin:0 auto 15px; }
+        @keyframes spin { 0%{ transform:rotate(0deg); } 100%{ transform:rotate(360deg); } }
+
+
+        #btn-cambios {
+            position: fixed;
+            bottom: 25px;
+            left: 25px;
+            z-index: 9999;
+            background: #1a5276;
+            color: white;
+            border: none;
+            padding: 12px 18px;
+            border-radius: 30px;
+            font-weight: bold;
+            font-size: 13px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #btn-cambios:hover { background: #2c3e50; }
+
+        #modal-cambios {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+        #modal-cambios.active { display: flex; }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 420px;
+            max-height: 70vh;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-header {
+            background: #1a5276;
+            color: white;
+            padding: 14px 18px;
+            font-weight: bold;
+            font-size: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-header button {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .modal-body {
+            padding: 16px;
+            overflow-y: auto;
+            font-size: 13px;
+        }
+        .cambio-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .cambio-item:last-child { border-bottom: none; }
+        .cambio-id { color: #666; font-size: 12px; }
+        .cambio-status {
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 12px;
+            color: white;
+            font-size: 11px;
+        }
+        .sin-cambios {
+            text-align: center;
+            color: #888;
+            padding: 30px 10px;
+        }
+    </style>
+</head>
+<body>
+<div id="loading" class="loading">
+    <div class="spinner"></div>
+    <p style="font-weight:bold;color:#1a5276;">Cargando Base de Datos...</p>
+</div>
+
+<div id="sync-status">
+    <div id="sync-dot"></div>
+    <div>
+        <div id="sync-text">Conectando...</div>
+        <div id="last-update"></div>
+    </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<div id="map"></div>
+
+
+<button id="btn-cambios" onclick="abrirModalCambios()">
+    📋 Ver cambios
+</button>
+
+
+<div id="modal-cambios">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span>Cambios desde Sheets</span>
+            <button onclick="cerrarModalCambios()">×</button>
+        </div>
+        <div class="modal-body" id="lista-cambios">
+            <div class="sin-cambios">Cargando...</div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+<script>
+
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwlapUWUmD6p6TcadsypOIwFlET-Z-TIgnq64Wi9NNMe8PjJ4Bh6F_7VtHxIoJzZ-8/exec";
+
+const STATUS_CONFIG = {
+    "INTERESADO":    { emoji:"📡", color:"#FF007F", grad:"linear-gradient(135deg,#FF007F,#FF6600)", tipo:"radar"  },
+    "PICK UP":       { emoji:"🚀", color:"#00C853", grad:"linear-gradient(135deg,#00C853,#00BCD4)", tipo:"bounce" },
+    "NO INTERESADO": { emoji:"⛔", color:"#9E9E9E", grad:"linear-gradient(135deg,#9E9E9E,#607D8B)", tipo:"opaco"  },
+    "CONTACTADO":    { emoji:"📞", color:"#3498db", grad:"linear-gradient(135deg,#3498db,#2980b9)", tipo:"normal" },
+    "SIN RESPUESTA": { emoji:"💤", color:"#f39c12", grad:"linear-gradient(135deg,#f39c12,#d35400)", tipo:"normal" },
+    "NO DISPONIBLE": { emoji:"🔒", color:"#607D8B", grad:"linear-gradient(135deg,#607D8B,#455A64)", tipo:"normal" }
+};
+
+const COLORES_CP  = ['blue','green','red','orange','purple','darkblue','cadetblue','darkgreen','pink','gray'];
+const COLORES_MUN = ['darkred','darkgreen','darkblue','purple','orange','red','green','blue','gray','black'];
+
+let map, allData = [], statusSheet = {};
+let cpLayers = {}, munLayers = {}, statusLayers = {}, heatLayer = null, layerControl = null;
+let pendingStatus = {};
+let cambiosAplicados = [];   // Lista de cambios para el modal
+
+
+function setSyncStatus(estado, texto) {
+    document.getElementById('sync-dot').className = estado;
+    document.getElementById('sync-text').textContent = texto;
+}
+
+function actualizarUltimaActualizacion() {
+    const ahora = new Date();
+    const fecha = ahora.toLocaleDateString('es-MX', { day:'2-digit', month:'2-digit', year:'numeric' });
+    const hora  = ahora.toLocaleTimeString('es-MX', { hour:'2-digit', minute:'2-digit' });
+    document.getElementById('last-update').textContent = `Última actualización: ${fecha} ${hora}`;
+}
+
+function mostrarToast(msg, esError = false) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast' + (esError ? ' error' : '');
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; }, 2800);
+}
+
+
+function abrirModalCambios() {
+    const lista = document.getElementById('lista-cambios');
+    
+    if (cambiosAplicados.length === 0) {
+        lista.innerHTML = '<div class="sin-cambios">No hay cambios recientes desde Sheets</div>';
+    } else {
+        let html = '';
+        cambiosAplicados.forEach(c => {
+            const color = STATUS_CONFIG[c.status] ? STATUS_CONFIG[c.status].color : '#666';
+            html += `
+                <div class="cambio-item">
+                    <span class="cambio-id">ID: ${c.id}</span>
+                    <span class="cambio-status" style="background:${color}">${c.status}</span>
+                </div>`;
+        });
+        lista.innerHTML = html;
+    }
+    
+    document.getElementById('modal-cambios').classList.add('active');
+}
+
+function cerrarModalCambios() {
+    document.getElementById('modal-cambios').classList.remove('active');
+}
+
+// Cerrar modal al hacer clic fuera
+document.getElementById('modal-cambios').addEventListener('click', function(e) {
+    if (e.target === this) cerrarModalCambios();
+});
+
+
+
+function linkWhatsapp(tel, nombre) {
+    let d = String(tel || '').replace(/\D/g, '');
+    if (d.length === 12 && d.startsWith('52')) { }
+    else if (d.length === 11 && (d.startsWith('01') || d.startsWith('1'))) d = '52' + d.slice(1);
+    else if (d.length === 10) d = '52' + d;
+    else return '';
+    const msg = `Hola ${nombre},\n\nTe escribo porque creo que este programa de Amazon Hub Delivery Partner puede ser una excelente oportunidad para ti.\n\nSe trata de un esquema oficial de Amazon México en el que puedes generar ingresos extras entregando paquetes muy cerca de tu casa (solo en un radio de aproximadamente 1 km). No necesitas vehículo especial ni hacer recorridos largos: trabajas en tu propia zona.\n\n¿Por qué vale la pena considerarlo?\n\n✅ Ingresos adicionales de forma sencilla\n✅ Flexibilidad de horarios\n✅ Forma parte del ecosistema oficial de Amazon Logistics\n✅ Recibes los paquetes directamente en tu negocio cada mañana\n\nSi te interesa conocer más detalles, puedes revisar la información oficial aquí:\n\n👉 Amazon Hub Delivery Partner – México\nhttps://logistics.amazon.com.mx/hubdelivery/marketing\n\nTambién te dejo un video corto que explica cómo funciona:\n▶️ https://youtu.be/UrKzMnWxKio?is=Hv_lLVemmjfjCBnB\n\nSi quieres que te explique más o tienes alguna duda, solo respóndeme a este mensaje y con gusto te ayudo.\n\n¡Saludos y que tengas un excelente día!`;
+    return 'https://wa.me/' + d + '?text=' + encodeURIComponent(msg);
+}
+
+async function cargarStatusSheet() {
+    try {
+        setSyncStatus('saving', 'Sincronizando...');
+        
+        const url = APPS_SCRIPT_URL + '?t=' + Date.now();
+        
+        const resp = await fetch(url, {
+            method: 'GET',
+            cache: 'no-store'
+        });
+        
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        
+        const json = await resp.json();
+        console.log('Respuesta de Sheets:', json);
+        
+        if (json.ok && json.data) {
+            statusSheet = json.data;
+            const cantidad = Object.keys(statusSheet).length;
+            setSyncStatus('ok', `Sincronizado · ${cantidad} registros`);
+            actualizarUltimaActualizacion();
+            return true;
+        } else {
+            throw new Error(json.error || 'Respuesta no válida');
+        }
+    } catch(e) {
+        setSyncStatus('error', 'Sin conexión a Sheets');
+        console.error('Error al leer Sheets:', e);
+        return false;
+    }
+}
+
+async function guardarStatusSheet(id, newStatus) {
+    try {
+        const resp = await fetch(APPS_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({ id: id, status: newStatus })
+        });
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Error al guardar');
+        statusSheet[id] = newStatus;
+        setSyncStatus('ok', `Sincronizado · ${Object.keys(statusSheet).length} registros`);
+        actualizarUltimaActualizacion();
+        
+
+        cambiosAplicados.unshift({ id: id, status: newStatus });
+        if (cambiosAplicados.length > 50) cambiosAplicados.pop();
+        
+        return true;
+    } catch(e) {
+        setSyncStatus('error', 'Error al guardar');
+        console.error('Error al escribir en Sheets:', e);
+        return false;
+    }
+}
+
+
+function crearIcono(status) {
+    const cfg = STATUS_CONFIG[status];
+    if (!cfg) return L.icon({ iconUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png', iconSize:[25,41], iconAnchor:[12,41] });
+    if (cfg.tipo === 'radar') return L.divIcon({ className:'', html:"<div class='marker-radar-wrapper'><div class='marker-radar-ring'></div><div class='marker-radar-ring'></div><div class='marker-radar-ring'></div><div class='marker-radar-core'>!</div></div>", iconSize:[44,44], iconAnchor:[22,22] });
+    if (cfg.tipo === 'bounce') return L.divIcon({ className:'', html:"<div class='marker-bounce-wrapper'><div class='marker-bounce-core'>🚀</div></div>", iconSize:[34,34], iconAnchor:[17,17] });
+    if (cfg.tipo === 'opaco')  return L.divIcon({ className:'', html:"<div class='marker-opaco-core'>⛔</div>", iconSize:[22,22], iconAnchor:[11,11] });
+    return L.divIcon({ className:'', html:`<div style="background:${cfg.color};width:30px;height:30px;border-radius:50%;border:3px solid white;box-shadow:0 0 8px ${cfg.color};display:flex;align-items:center;justify-content:center;font-size:14px;">${cfg.emoji}</div>`, iconSize:[30,30], iconAnchor:[15,15] });
+}
+
+function crearBadgeHTML(status) {
+    const cfg = STATUS_CONFIG[status];
+    if (!cfg) return '';
+    return `<div style="background:${cfg.grad};color:white;font-weight:bold;padding:5px 12px;border-radius:20px;display:inline-block;margin-bottom:8px;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${cfg.emoji} ${status}</div>`;
+}
+
+function buildPopup(row) {
+    const id     = row.id;
+    const status = row.status || 'SIN STATUS';
+    const cfg    = STATUS_CONFIG[status] || {};
+    const color  = cfg.color  || '#333';
+    const borde  = cfg.color  ? `border-left:5px solid ${cfg.color};` : '';
+
+    const badge = `<div id="badge-${id}">${crearBadgeHTML(status)}</div>`;
+
+    const waButton = row.whatsapp_link
+        ? `<div style="margin-top:12px;text-align:center;"><a href="${row.whatsapp_link}" target="_blank" style="text-decoration:none;"><div style="background:#25D366;color:white;padding:8px 15px;border-radius:20px;font-weight:bold;display:inline-flex;align-items:center;gap:8px;box-shadow:0 2px 5px rgba(0,0,0,0.2);font-size:12px;"><svg width="16" height="16" fill="white" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>Contactar por WhatsApp</div></a></div>`
+        : '';
+
+    const changeButtons = `
+        <div style="margin-top:15px;border-top:1px solid #eee;padding-top:10px;">
+            <p style="font-size:11px;color:#666;margin-bottom:5px;"><b>Cambiar Status:</b></p>
+            <button class="status-btn btn-interesado"  onclick="prepararCambio('${id}','INTERESADO')">📡 INTERESADO</button>
+            <button class="status-btn btn-pickup"      onclick="prepararCambio('${id}','PICK UP')">🚀 PICK UP</button>
+            <button class="status-btn btn-contactado"  onclick="prepararCambio('${id}','CONTACTADO')">📞 CONTACTADO</button>
+            <button class="status-btn btn-sinresp"     onclick="prepararCambio('${id}','SIN RESPUESTA')">💤 SIN RESPUESTA</button>
+            <button class="status-btn btn-no"          onclick="prepararCambio('${id}','NO INTERESADO')">⛔ NO INTERESADO</button>
+        </div>
+        <div id="confirm-${id}" class="confirm-box">
+            <p id="confirm-text-${id}">¿Cambiar status?</p>
+            <button class="btn-confirm" onclick="confirmarCambio('${id}')">✅ Confirmar</button>
+            <button class="btn-cancel"  onclick="cancelarCambio('${id}')">Cancelar</button>
+        </div>`;
+
+    return `
+        <div id="popup-${id}" style="font-family:Arial,sans-serif;min-width:240px;font-size:13px;${borde}padding-left:10px;">
+            ${badge}
+            <b style="font-size:15px;color:#1a5276;">${row.nom_estab}</b><br><br>
+            <b>Razón Social:</b> ${row.raz_social}<br>
+            <b>Calle:</b> ${row.nom_vial}<br>
+            <b>Número:</b> ${row.numero_ext}<br>
+            <b>C.P.:</b> ${row.cod_postal}<br>
+            <b>Municipio:</b> ${row.municipio}<br>
+            <b>Teléfono:</b> ${row.telefono}<br>
+            <b>Status Actual:</b> <span id="status-text-${id}" style="color:${color};font-weight:bold;">${status}</span>
+            ${waButton}
+            ${changeButtons}
+        </div>`;
+}
+
+window.prepararCambio = function(id, newStatus) {
+    pendingStatus[id] = newStatus;
+    const box = document.getElementById(`confirm-${id}`);
+    const text = document.getElementById(`confirm-text-${id}`);
+    if (box && text) {
+        text.innerHTML = `¿Cambiar status a <b style="color:#1a5276;">${newStatus}</b>?`;
+        box.style.display = 'block';
+    }
+};
+
+window.cancelarCambio = function(id) {
+    delete pendingStatus[id];
+    const box = document.getElementById(`confirm-${id}`);
+    if (box) box.style.display = 'none';
+};
+
+window.confirmarCambio = async function(id) {
+    const newStatus = pendingStatus[id];
+    if (!newStatus) return;
+    const box = document.getElementById(`confirm-${id}`);
+    if (box) box.style.display = 'none';
+    delete pendingStatus[id];
+    await updateStatus(id, newStatus);
+};
+
+window.updateStatus = async function(id, newStatus) {
+    const popup = document.getElementById(`popup-${id}`);
+    const btns  = popup ? popup.querySelectorAll('.status-btn') : [];
+    btns.forEach(b => b.disabled = true);
+    setSyncStatus('saving', 'Guardando...');
+
+    const statusTextElem = document.getElementById('status-text-' + id);
+    const badgeElem = document.getElementById('badge-' + id);
+    const oldStatus = statusTextElem ? statusTextElem.innerText.trim() : 'DESCONOCIDO';
+
+    if (statusTextElem) {
+        statusTextElem.innerText = newStatus;
+        const colors = { 'INTERESADO':'#FF007F','PICK UP':'#00C853','NO INTERESADO':'#9E9E9E','CONTACTADO':'#3498db','SIN RESPUESTA':'#f39c12','NO DISPONIBLE':'#607D8B' };
+        statusTextElem.style.color = colors[newStatus] || '#333';
+    }
+    if (badgeElem) badgeElem.innerHTML = crearBadgeHTML(newStatus);
+    if (popup) {
+        const cfg = STATUS_CONFIG[newStatus];
+        popup.style.borderLeft = cfg ? `5px solid ${cfg.color}` : 'none';
+    }
+
+    const dataIdx = allData.findIndex(d => d.id === id);
+    if (dataIdx !== -1) allData[dataIdx].status = newStatus;
+
+    const ok = await guardarStatusSheet(id, newStatus);
+    btns.forEach(b => b.disabled = false);
+
+    if (ok) {
+        mostrarToast(`✅ ${newStatus} guardado en Sheets`);
+    } else {
+        if (statusTextElem) {
+            statusTextElem.innerText = oldStatus;
+            const colors = { 'INTERESADO':'#FF007F','PICK UP':'#00C853','NO INTERESADO':'#9E9E9E','CONTACTADO':'#3498db','SIN RESPUESTA':'#f39c12','NO DISPONIBLE':'#607D8B' };
+            statusTextElem.style.color = colors[oldStatus] || '#333';
+        }
+        if (badgeElem) badgeElem.innerHTML = crearBadgeHTML(oldStatus);
+        if (popup) {
+            const cfg = STATUS_CONFIG[oldStatus];
+            popup.style.borderLeft = cfg ? `5px solid ${cfg.color}` : 'none';
+        }
+        if (dataIdx !== -1) allData[dataIdx].status = oldStatus;
+        mostrarToast('❌ Error al guardar. Intenta de nuevo.', true);
+    }
+};
+
+function crearMarker(row, cluster) {
+    const cfg     = STATUS_CONFIG[row.status] || {};
+    const tooltip = cfg.emoji ? `${cfg.emoji} ${row.status} — ${row.nom_estab}` : row.nom_estab;
+    const marker  = L.marker([row.latitud, row.longitud], { icon: crearIcono(row.status) });
+    marker.bindPopup(buildPopup(row), { maxWidth:340 });
+    marker.bindTooltip(tooltip);
+    cluster.addLayer(marker);
+    return marker;
+}
+
+function construirCapas(data) {
+    Object.values(cpLayers).forEach(l => map.removeLayer(l));
+    Object.values(munLayers).forEach(l => map.removeLayer(l));
+    Object.values(statusLayers).forEach(l => map.removeLayer(l));
+    if (heatLayer) map.removeLayer(heatLayer);
+    if (layerControl) layerControl.remove();
+
+    cpLayers = {}; munLayers = {}; statusLayers = {};
+    const byCP = {}, byMun = {}, bySt = {};
+
+    data.forEach(row => {
+        (byCP[row.cod_postal] = byCP[row.cod_postal] || []).push(row);
+        (byMun[row.municipio] = byMun[row.municipio] || []).push(row);
+        (bySt[row.status]     = bySt[row.status]     || []).push(row);
+    });
+
+    const overlays = {};
+
+    Object.keys(byCP).sort().forEach((cp, i) => {
+        const color = COLORES_CP[i % COLORES_CP.length];
+        const cl = L.markerClusterGroup({
+            iconCreateFunction: new Function('cluster', `return L.divIcon({html:'<div style="background:${color};width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);">'+cluster.getChildCount()+'</div>',className:'marker-cluster-custom',iconSize:L.point(40,40)});`)
+        });
+        byCP[cp].forEach(row => crearMarker(row, cl));
+        cpLayers[cp] = cl;
+        overlays[`CP_${cp}`] = cl;
+    });
+
+    Object.keys(byMun).sort().forEach((mun, i) => {
+        const color = COLORES_MUN[i % COLORES_MUN.length];
+        const cl = L.markerClusterGroup({
+            iconCreateFunction: new Function('cluster', `return L.divIcon({html:'<div style="background:${color};width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;border:2px solid white;box-shadow:0 2px 5px rgba(0,0,0,0.3);">'+cluster.getChildCount()+'</div>',className:'marker-cluster-custom',iconSize:L.point(40,40)});`)
+        });
+        byMun[mun].forEach(row => crearMarker(row, cl));
+        munLayers[mun] = cl;
+        overlays[`MUN_${mun}`] = cl;
+    });
+
+    Object.keys(bySt).sort().forEach(st => {
+        const color = STATUS_CONFIG[st] ? STATUS_CONFIG[st].color : '#607D8B';
+        const cl = L.markerClusterGroup({
+            iconCreateFunction: new Function('cluster', `return L.divIcon({html:'<div style="background:${color};width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font-weight:bold;border:2px solid white;box-shadow:0 2px 8px rgba(0,0,0,0.4);">'+cluster.getChildCount()+'</div>',className:'marker-cluster-custom',iconSize:L.point(40,40)});`)
+        });
+        bySt[st].forEach(row => crearMarker(row, cl));
+        statusLayers[st] = cl;
+        overlays[`ST_${st}`] = cl;
+    });
+
+    const heatData = data.map(row => {
+        let peso = 1;
+        if (row.status === 'INTERESADO')  peso = 3;
+        else if (row.status === 'PICK UP') peso = 2;
+        else if (row.status === 'CONTACTADO') peso = 1.5;
+        return [row.latitud, row.longitud, peso];
+    });
+    heatLayer = L.heatLayer(heatData, { minOpacity:0.3, maxZoom:18, radius:15, blur:10, gradient:{0.2:'blue',0.4:'cyan',0.6:'lime',0.8:'yellow',1.0:'red'} });
+    overlays['Zona de Calor'] = heatLayer;
+
+    const baseLayers = {
+        'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap'
+        })
+    };
+
+    layerControl = L.control.layers(baseLayers, overlays, { collapsed:false }).addTo(map);
+}
+
+
+window.addEventListener('load', async function () {
+    map = L.map('map').setView([19.4326, -99.1332], 11);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    try {
+        setSyncStatus('saving', 'Cargando datos desde Sheets...');
+        const resp = await fetch(APPS_SCRIPT_URL + '?modo=datos&t=' + Date.now(), { cache: 'no-store' });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const json = await resp.json();
+        if (!json.ok) throw new Error(json.error || 'Respuesta no válida');
+
+        const cols = json.columnas;
+        allData = json.filas.map(f => { const o = {}; cols.forEach((c, i) => o[c] = f[i]); return o; });
+        allData.forEach(o => {
+            o.latitud  = Number(o.latitud);
+            o.longitud = Number(o.longitud);
+            o.status   = String(o.status || '').trim().toUpperCase() || 'NO DISPONIBLE';
+            o.whatsapp_link = linkWhatsapp(o.telefono, o.nom_estab);
+        });
+        allData = allData.filter(o => isFinite(o.latitud) && isFinite(o.longitud));
+
+        statusSheet = {};
+        allData.forEach(o => statusSheet[o.id] = o.status);
+        cambiosAplicados = [];
+        const ok = true;
+        setSyncStatus('ok', `Sincronizado · ${allData.length} registros`);
+        actualizarUltimaActualizacion();
+
+        console.log(ok
+            ? `✅ ${cambiosAplicados.length} cambios aplicados desde Sheets`
+            : '⚠️ No se pudo conectar a Sheets');
+
+        construirCapas(allData);
+        document.getElementById('loading').style.display = 'none';
+
+    } catch(err) {
+        console.error(err);
+        setSyncStatus('error', 'Error al cargar datos');
+        alert('Error al cargar los datos desde Google Sheets');
+    }
+});
+</script>
+</body>
+</html>
